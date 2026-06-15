@@ -1,0 +1,10 @@
+node_modules/
+.venv/
+dist/
+outputs/
+logs/
+backend/__pycache__/
+backend/*.db
+backend/*.db-*
+*.pyc
+*.log
