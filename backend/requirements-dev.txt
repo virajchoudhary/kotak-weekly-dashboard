@@ -1,0 +1,5 @@
+# Development / security tooling. Not installed in the runtime image.
+# Install with:  python -m pip install -r backend/requirements-dev.txt
+-r requirements.txt
+pip-audit
+bandit
