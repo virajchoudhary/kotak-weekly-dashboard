@@ -244,6 +244,17 @@ input { font: inherit; }
     overflow: hidden;
 }
 
+/*
+ * Cards that hold a custom dropdown must not clip it: the .glass-select-menu is
+ * absolutely positioned and needs to extend past the card edge (e.g. the period
+ * picker in Download Workbooks). Long lists stay bounded via the menu's own
+ * max-height + internal scroll, so allowing overflow here is safe. Inner tables
+ * use .table-scroll, which clips itself, so corners are unaffected.
+ */
+.card:has(.glass-select) {
+    overflow: visible;
+}
+
 .card-header {
     border-bottom: 1px solid var(--divider);
     padding: 24px 28px 18px;
