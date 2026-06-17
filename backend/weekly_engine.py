@@ -1,17 +1,22 @@
 import calendar
 import io
+import os
 import re
 import sqlite3
+import zipfile
 from copy import copy
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
+from xml.etree.ElementTree import ParseError
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.utils.exceptions import InvalidFileException
 from openpyxl.worksheet.views import Selection
 
-DB_PATH = Path(__file__).resolve().parent / "weekly_amfi.db"
+DEFAULT_DB_PATH = Path(__file__).resolve().parent / "weekly_amfi.db"
+DB_PATH = Path(os.environ.get("WEEKLY_DB_PATH") or os.environ.get("DB_PATH") or DEFAULT_DB_PATH)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SEED_UPLOAD_DIRS = (
     PROJECT_ROOT / "data" / "uploads",
@@ -81,6 +86,7 @@ WORKBOOK_TEMPLATE_VERSION = "monthly-blocks-with-final-ytd-summary-v2"
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     return conn
@@ -202,9 +208,12 @@ def collapse_monthly_uploads(conn):
 
 
 def parse_upload(upload_bytes: bytes, filename: str) -> tuple[dict, list[dict], list[dict]]:
-    workbook_values = load_workbook(io.BytesIO(upload_bytes), data_only=True)
-    workbook_formulas = load_workbook(io.BytesIO(upload_bytes), data_only=False)
+    validate_xlsx_content(upload_bytes)
+    workbook_values = None
+    workbook_formulas = None
     try:
+        workbook_values = load_workbook(io.BytesIO(upload_bytes), data_only=True)
+        workbook_formulas = load_workbook(io.BytesIO(upload_bytes), data_only=False)
         if "Summary" not in workbook_values.sheetnames:
             raise ValueError("Uploaded workbook must contain a 'Summary' sheet.")
         ws_values = workbook_values["Summary"]
@@ -212,11 +221,34 @@ def parse_upload(upload_bytes: bytes, filename: str) -> tuple[dict, list[dict], 
         title = str(ws_formulas["C3"].value or ws_values["C3"].value or "")
         period = parse_period(filename, title)
         rows = extract_summary_rows(ws_values)
+        validate_summary_structure(rows)
         schemes = extract_scheme_rows(workbook_values)
         return period, rows, schemes
+    except (zipfile.BadZipFile, InvalidFileException, KeyError, OSError, EOFError, ParseError) as exc:
+        raise ValueError("Uploaded file must be a valid .xlsx workbook.") from exc
     finally:
-        workbook_values.close()
-        workbook_formulas.close()
+        if workbook_values is not None:
+            workbook_values.close()
+        if workbook_formulas is not None:
+            workbook_formulas.close()
+
+
+def validate_xlsx_content(upload_bytes: bytes) -> None:
+    try:
+        with zipfile.ZipFile(io.BytesIO(upload_bytes)) as archive:
+            names = set(archive.namelist())
+    except zipfile.BadZipFile as exc:
+        raise ValueError("Uploaded file must be a valid .xlsx workbook.") from exc
+    required_parts = {"[Content_Types].xml", "xl/workbook.xml"}
+    if not required_parts.issubset(names):
+        raise ValueError("Uploaded file must be a valid .xlsx workbook.")
+
+
+def validate_summary_structure(rows: list[dict]) -> None:
+    if not rows:
+        raise ValueError("Uploaded workbook Summary sheet does not contain the expected dashboard rows.")
+    if not any(row.get("rowLabel") == "Total" for row in rows):
+        raise ValueError("Uploaded workbook Summary sheet is missing the required Total row.")
 
 
 def parse_period(filename: str, title: str) -> dict:
@@ -360,63 +392,68 @@ def process_upload(upload_bytes: bytes, filename: str) -> tuple[dict, list[str]]
 
 def upsert_upload(conn, period: dict, rows: list[dict], schemes: list[dict], filename: str | None = None):
     cur = conn.cursor()
-    period_key = period["periodKey"]
-    month_prefix = period["endDate"][:7]
-    existing_keys = [
-        row[0]
-        for row in cur.execute(
-            """
-            SELECT period_key
-            FROM periods
-            WHERE financial_year = ?
-              AND substr(end_date, 1, 7) = ?
-            """,
-            (period["financialYear"], month_prefix),
-        ).fetchall()
-    ]
-    if period_key not in existing_keys:
-        existing_keys.append(period_key)
-    for key in existing_keys:
-        cur.execute("DELETE FROM summary_rows WHERE period_key = ?", (key,))
-        cur.execute("DELETE FROM scheme_rows WHERE period_key = ?", (key,))
-        cur.execute("DELETE FROM periods WHERE period_key = ?", (key,))
-    cur.execute("""
-        INSERT INTO periods (
-            period_key, period_label, start_date, end_date, financial_year, source_filename
-        ) VALUES (?, ?, ?, ?, ?, ?)
-    """, (
-        period_key, period["periodLabel"], period["startDate"], period["endDate"],
-        period["financialYear"], filename,
-    ))
-    cur.executemany("""
-        INSERT INTO summary_rows (
-            period_key, source_row, row_order, row_label, in_summary, in_mom,
-            aum_kotak, aum_industry, aum_ms, gross_kotak, gross_industry,
-            gross_ms, net_kotak, net_industry, net_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, [
-        (
-            period_key, row["sourceRow"], row["rowOrder"], row["rowLabel"],
-            row["inSummary"], row["inMom"], row["aumKotak"], row["aumIndustry"], row["aumMs"],
-            row["grossKotak"], row["grossIndustry"], row["grossMs"],
-            row["netKotak"], row["netIndustry"], row["netMs"],
-        )
-        for row in rows
-    ])
-    cur.executemany("""
-        INSERT INTO scheme_rows (
-            period_key, scheme_name, asset_class, asset_amc, sales_mis_group,
-            scheme_main_group, aum, gross_sales, net_sales, redemption
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, [
-        (
-            period_key, row["schemeName"], row["assetClass"], row["assetAmc"],
-            row["salesMisGroup"], row["schemeMainGroup"], row["aum"],
-            row["grossSales"], row["netSales"], row["redemption"],
-        )
-        for row in schemes
-    ])
-    conn.commit()
+    try:
+        cur.execute("BEGIN IMMEDIATE")
+        period_key = period["periodKey"]
+        month_prefix = period["endDate"][:7]
+        existing_keys = [
+            row[0]
+            for row in cur.execute(
+                """
+                SELECT period_key
+                FROM periods
+                WHERE financial_year = ?
+                  AND substr(end_date, 1, 7) = ?
+                """,
+                (period["financialYear"], month_prefix),
+            ).fetchall()
+        ]
+        if period_key not in existing_keys:
+            existing_keys.append(period_key)
+        for key in existing_keys:
+            cur.execute("DELETE FROM summary_rows WHERE period_key = ?", (key,))
+            cur.execute("DELETE FROM scheme_rows WHERE period_key = ?", (key,))
+            cur.execute("DELETE FROM periods WHERE period_key = ?", (key,))
+        cur.execute("""
+            INSERT INTO periods (
+                period_key, period_label, start_date, end_date, financial_year, source_filename
+            ) VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            period_key, period["periodLabel"], period["startDate"], period["endDate"],
+            period["financialYear"], filename,
+        ))
+        cur.executemany("""
+            INSERT INTO summary_rows (
+                period_key, source_row, row_order, row_label, in_summary, in_mom,
+                aum_kotak, aum_industry, aum_ms, gross_kotak, gross_industry,
+                gross_ms, net_kotak, net_industry, net_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            (
+                period_key, row["sourceRow"], row["rowOrder"], row["rowLabel"],
+                row["inSummary"], row["inMom"], row["aumKotak"], row["aumIndustry"], row["aumMs"],
+                row["grossKotak"], row["grossIndustry"], row["grossMs"],
+                row["netKotak"], row["netIndustry"], row["netMs"],
+            )
+            for row in rows
+        ])
+        cur.executemany("""
+            INSERT INTO scheme_rows (
+                period_key, scheme_name, asset_class, asset_amc, sales_mis_group,
+                scheme_main_group, aum, gross_sales, net_sales, redemption
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            (
+                period_key, row["schemeName"], row["assetClass"], row["assetAmc"],
+                row["salesMisGroup"], row["schemeMainGroup"], row["aum"],
+                row["grossSales"], row["netSales"], row["redemption"],
+            )
+            for row in schemes
+        ])
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def list_archives() -> list[dict]:
@@ -537,7 +574,7 @@ def dashboard_payload(
         "categorySummary": category_summary,
         "schemeSummary": scheme_summary,
         "warnings": warnings or [],
-        "generatedAt": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "generatedAt": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds") + "Z",
     }
 
 
