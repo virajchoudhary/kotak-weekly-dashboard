@@ -5,6 +5,7 @@
     --bg-secondary: #1a1a1a;
     --bg-hover: rgba(255, 255, 255, 0.08);
     --border: rgba(255, 255, 255, 0.08);
+    --border-hover: rgba(255, 255, 255, 0.15);
     --border-strong: rgba(255, 255, 255, 0.15);
     --divider: rgba(255, 255, 255, 0.08);
     --text-primary: #ffffff;
@@ -30,13 +31,19 @@
     --warning-text: #facc15;
     --chart-grid: rgba(255, 255, 255, 0.06);
     --chart-axis: #6b7280;
-    --chart-primary: rgba(255, 255, 255, 0.72);
-    --chart-secondary: rgba(148, 163, 184, 0.72);
-    --chart-danger: rgba(203, 213, 225, 0.56);
+    --chart-primary: #ffffff;
+    --chart-secondary: #6b7280;
+    --chart-danger: #a3a3a3;
+    --chart-extra: #d1d5db;
     --chart-fill: rgba(255, 255, 255, 0.10);
     --chart-cursor: rgba(255, 255, 255, 0.045);
     --chart-active-bar: rgba(255, 255, 255, 0.32);
-    --chart-active-stroke: rgba(255, 255, 255, 0.72);
+    --chart-active-stroke: rgba(255, 255, 255, 0.85);
+    --glass-bg: rgba(18, 18, 18, 0.70);
+    --glass-blur: blur(16px) saturate(160%);
+    --glass-border: rgba(255, 255, 255, 0.16);
+    --glass-radius: 12px;
+    --glass-shadow: 0 16px 48px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.08);
     --radius-sm: 8px;
     --radius-md: 12px;
     --radius-pill: 999px;
@@ -49,6 +56,7 @@
     --bg-secondary: #eef4fb;
     --bg-hover: #e8eef7;
     --border: #d8e1ee;
+    --border-hover: #b9c7d9;
     --border-strong: #b9c7d9;
     --divider: #edf2f7;
     --text-primary: #111827;
@@ -74,13 +82,19 @@
     --warning-text: #7c2d12;
     --chart-grid: #d9e2ef;
     --chart-axis: #64748b;
-    --chart-primary: #1d4ed8;
-    --chart-secondary: #059669;
-    --chart-danger: #dc2626;
-    --chart-fill: rgba(29, 78, 216, 0.14);
+    --chart-primary: #111827;
+    --chart-secondary: #6b7280;
+    --chart-danger: #a3a3a3;
+    --chart-extra: #d1d5db;
+    --chart-fill: rgba(17, 24, 39, 0.12);
     --chart-cursor: rgba(29, 78, 216, 0.08);
     --chart-active-bar: rgba(29, 78, 216, 0.28);
-    --chart-active-stroke: rgba(29, 78, 216, 0.62);
+    --chart-active-stroke: rgba(17, 24, 39, 0.78);
+    --glass-bg: rgba(18, 18, 18, 0.70);
+    --glass-blur: blur(16px) saturate(160%);
+    --glass-border: rgba(255, 255, 255, 0.16);
+    --glass-radius: 12px;
+    --glass-shadow: 0 16px 48px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.08);
     --radius-sm: 8px;
     --radius-md: 12px;
     --radius-pill: 999px;
@@ -422,8 +436,8 @@ input { font: inherit; }
     gap: 8px;
 }
 
-.control-field span,
-.period-selector span {
+.control-field > span,
+.period-selector > span {
     color: var(--text-secondary);
     font-size: 0.78rem;
     font-weight: 800;
@@ -458,23 +472,6 @@ input { font: inherit; }
     gap: 8px;
     min-width: 220px;
     flex: 0 1 310px;
-}
-
-.period-selector select {
-    width: 100%;
-    min-height: 44px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg-card);
-    color: var(--text-primary);
-    font: inherit;
-    font-weight: 700;
-    padding: 8px 14px;
-}
-
-.period-selector select:focus {
-    border-color: var(--accent);
-    outline: none;
 }
 
 .download-button {
@@ -585,20 +582,67 @@ input { font: inherit; }
     fill: var(--chart-axis);
 }
 
-.chart-tooltip {
-    background:
-        linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 84%, #ffffff 10%), color-mix(in srgb, var(--bg-card) 94%, #000000 8%));
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
-    padding: 12px 14px;
-    display: grid;
-    gap: 6px;
-    color: var(--text-secondary);
-    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(18px);
+.recharts-tooltip-wrapper {
+    outline: none;
 }
 
-.chart-tooltip strong { color: var(--text-primary); }
+.chart-tooltip {
+    min-width: 220px;
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--glass-radius);
+    box-shadow: var(--glass-shadow);
+    color: #ffffff;
+    padding: 12px;
+    display: grid;
+    gap: 8px;
+}
+
+.chart-tooltip-title {
+    color: var(--text-primary);
+    font-size: 0.86rem;
+    font-weight: 800;
+    line-height: 1.25;
+}
+
+.chart-tooltip-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 18px;
+    align-items: center;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+}
+
+.chart-tooltip-label {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.chart-tooltip-label > span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chart-tooltip-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.22);
+    flex: 0 0 auto;
+}
+
+.chart-tooltip-value {
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    font-weight: 750;
+    text-align: right;
+    white-space: nowrap;
+}
 
 .table-scroll {
     width: 100%;
@@ -828,24 +872,6 @@ input { font: inherit; }
     flex-wrap: wrap;
 }
 
-.fy-select {
-    min-height: 44px;
-    padding: 8px 14px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    background: var(--bg-card);
-    color: var(--text-primary);
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    outline: none;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.fy-select:focus {
-    border-color: var(--accent);
-}
-
 .archives-header {
     margin-bottom: 20px;
     display: flex;
@@ -1054,13 +1080,22 @@ input { font: inherit; }
     z-index: 20;
 }
 
+.year-field .glass-select {
+    min-width: 180px;
+}
+
+.period-selector .glass-select {
+    min-width: 220px;
+}
+
 .glass-select-trigger {
     width: 100%;
     min-height: 44px;
     border: 1px solid var(--border);
-    border-radius: var(--radius-pill);
-    background:
-        linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 84%, #ffffff 10%), color-mix(in srgb, var(--bg-card) 92%, #000000 8%));
+    border-radius: var(--glass-radius);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025));
+    backdrop-filter: blur(12px) saturate(140%);
+    -webkit-backdrop-filter: blur(12px) saturate(140%);
     color: var(--text-primary);
     cursor: pointer;
     display: inline-flex;
@@ -1068,7 +1103,8 @@ input { font: inherit; }
     justify-content: space-between;
     gap: 10px;
     padding: 0 14px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 28px rgba(0, 0, 0, 0.18);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 
 .glass-select-trigger span {
@@ -1080,7 +1116,13 @@ input { font: inherit; }
 }
 
 .glass-select-trigger.open {
-    border-color: var(--border-strong);
+    border-color: var(--border-hover);
+}
+
+.glass-select-trigger:focus-visible {
+    border-color: var(--border-hover);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    outline: none;
 }
 
 .glass-select-chevron {
@@ -1098,23 +1140,26 @@ input { font: inherit; }
     left: 0;
     right: 0;
     z-index: 60;
-    border: 1px solid var(--border-strong);
-    border-radius: 18px;
-    background:
-        linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 88%, #ffffff 8%), color-mix(in srgb, var(--bg-card) 94%, #000000 8%));
-    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--glass-radius);
+    box-shadow: var(--glass-shadow);
+    color: #ffffff;
     max-height: min(360px, 58vh);
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: 6px;
-    backdrop-filter: blur(18px);
+    animation: glass-menu-in 140ms ease-out;
+    transform-origin: top center;
 }
 
 .glass-select-option {
     width: 100%;
     min-height: 38px;
     border: none;
-    border-radius: 12px;
+    border-radius: 8px;
     background: transparent;
     color: var(--text-primary);
     cursor: pointer;
@@ -1126,13 +1171,25 @@ input { font: inherit; }
     text-align: left;
 }
 
-.glass-select-option:hover {
-    background: var(--bg-hover);
+.glass-select-option:hover,
+.glass-select-option.highlighted {
+    background: rgba(255, 255, 255, 0.08);
 }
 
 .glass-select-option.active {
-    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    background: rgba(255, 255, 255, 0.08);
     color: var(--text-primary);
+}
+
+@keyframes glass-menu-in {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .archive-actions {

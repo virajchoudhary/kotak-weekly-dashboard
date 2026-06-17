@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
     Check,
     ChevronDown,
@@ -20,6 +20,7 @@ import {
     Legend,
     Line,
     LineChart,
+    Rectangle,
     ResponsiveContainer,
     Tooltip,
     XAxis,
@@ -30,6 +31,7 @@ const API = import.meta.env.VITE_API_URL ||
     ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && window.location.port !== '8000'
         ? 'http://127.0.0.1:8010'
         : window.location.origin);
+const XLSX_EXTENSION = '.xlsx';
 
 const tabs = [
     { id: 'overview', label: 'Overview' },
@@ -39,15 +41,15 @@ const tabs = [
 ];
 
 const tooltipCursor = { fill: 'var(--chart-cursor)' };
-const activeBarStyle = {
-    fill: 'var(--chart-active-bar)',
-    stroke: 'var(--chart-active-stroke)',
-    strokeWidth: 1,
-};
+const locale = 'en-IN';
+
+function renderActiveBar(props) {
+    return <Rectangle {...props} stroke="#fff" strokeWidth={2} strokeOpacity={0.85} />;
+}
 
 function formatNumber(value, digits = 2) {
     if (typeof value !== 'number' || Number.isNaN(value)) return value ?? '';
-    return new Intl.NumberFormat('en-IN', { maximumFractionDigits: digits }).format(value);
+    return new Intl.NumberFormat(locale, { maximumFractionDigits: digits }).format(value);
 }
 
 function formatPercent(value) {
@@ -122,10 +124,52 @@ function EmptyState({ children = 'No data loaded.' }) {
     return <div className="empty-state">{children}</div>;
 }
 
-function GlassSelect({ icon, value, options, onChange }) {
+function GlassSelect({ icon, value, options, onChange, ariaLabel, className = '' }) {
     const [open, setOpen] = useState(false);
+    const [activeIndex, setActiveIndex] = useState(0);
     const rootRef = useRef(null);
-    const selected = options.find(option => option.value === value) || options[0];
+    const listboxId = useId();
+    const selectedIndex = Math.max(0, options.findIndex(option => option.value === value));
+    const selected = options[selectedIndex] || options[0];
+
+    function selectOption(option) {
+        if (!option) return;
+        onChange(option.value);
+        setOpen(false);
+    }
+
+    function openMenu(nextIndex = selectedIndex) {
+        setActiveIndex(nextIndex);
+        setOpen(true);
+    }
+
+    function handleKeyDown(event) {
+        if (!options.length) return;
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            if (!open) {
+                openMenu(selectedIndex);
+                return;
+            }
+            setActiveIndex(index => (index + 1) % options.length);
+        } else if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            if (!open) {
+                openMenu(selectedIndex);
+                return;
+            }
+            setActiveIndex(index => (index - 1 + options.length) % options.length);
+        } else if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            if (!open) {
+                openMenu(selectedIndex);
+                return;
+            }
+            selectOption(options[activeIndex]);
+        } else if (event.key === 'Escape') {
+            setOpen(false);
+        }
+    }
 
     useEffect(() => {
         function handleClick(event) {
@@ -135,33 +179,43 @@ function GlassSelect({ icon, value, options, onChange }) {
         return () => document.removeEventListener('mousedown', handleClick);
     }, []);
 
+    useEffect(() => {
+        if (!open) setActiveIndex(selectedIndex);
+    }, [open, selectedIndex]);
+
     return (
-        <div className="glass-select" ref={rootRef}>
+        <div className={`glass-select ${className}`} ref={rootRef} onKeyDown={handleKeyDown}>
             <button
                 type="button"
                 className={`glass-select-trigger ${open ? 'open' : ''}`}
-                onClick={() => setOpen(value => !value)}
+                onClick={() => (open ? setOpen(false) : openMenu(selectedIndex))}
                 aria-haspopup="listbox"
                 aria-expanded={open}
+                aria-controls={listboxId}
+                aria-label={ariaLabel || selected?.label || 'Select option'}
+                aria-activedescendant={open ? `${listboxId}-option-${activeIndex}` : undefined}
             >
                 {icon}
                 <span>{selected?.label}</span>
                 <ChevronDown size={16} className="glass-select-chevron" />
             </button>
             {open && (
-                <div className="glass-select-menu" role="listbox">
+                <div className="glass-select-menu" id={listboxId} role="listbox" aria-label={ariaLabel}>
                     {options.map(option => {
                         const active = option.value === value;
+                        const optionIndex = options.indexOf(option);
+                        const highlighted = optionIndex === activeIndex;
                         return (
                             <button
                                 type="button"
                                 key={option.value}
-                                className={`glass-select-option ${active ? 'active' : ''}`}
+                                id={`${listboxId}-option-${optionIndex}`}
+                                className={`glass-select-option ${active ? 'active' : ''} ${highlighted ? 'highlighted' : ''}`}
                                 role="option"
                                 aria-selected={active}
+                                onMouseEnter={() => setActiveIndex(optionIndex)}
                                 onClick={() => {
-                                    onChange(option.value);
-                                    setOpen(false);
+                                    selectOption(option);
                                 }}
                             >
                                 <span>{option.label}</span>
@@ -175,14 +229,38 @@ function GlassSelect({ icon, value, options, onChange }) {
     );
 }
 
+function isPercentSeries(item) {
+    const key = `${item?.dataKey || ''} ${item?.name || ''}`.toLowerCase();
+    return key.includes('percent') || key.includes('share') || key.includes('ms');
+}
+
+function formatTooltipValue(item) {
+    const value = item?.value;
+    if (typeof value !== 'number' || Number.isNaN(value)) return value ?? '';
+    if (!isPercentSeries(item)) {
+        return value.toLocaleString(locale, { maximumFractionDigits: 2 });
+    }
+    const percentValue = Math.abs(value) <= 1 ? value * 100 : value;
+    return `${percentValue.toLocaleString(locale, { maximumFractionDigits: 2 })}%`;
+}
+
 function ChartTooltip({ active, payload, label }) {
     if (!active || !payload?.length) return null;
     const title = payload[0]?.payload?.tooltipLabel || payload[0]?.payload?.schemeName || payload[0]?.payload?.period || label;
     return (
         <div className="chart-tooltip">
-            <strong>{title}</strong>
+            <strong className="chart-tooltip-title">{title}</strong>
             {payload.map(item => (
-                <span key={item.dataKey}>{item.name}: {formatNumber(item.value)}</span>
+                <div className="chart-tooltip-row" key={item.dataKey || item.name}>
+                    <span className="chart-tooltip-label">
+                        <span
+                            className="chart-tooltip-dot"
+                            style={{ backgroundColor: item.color || item.stroke || item.fill || '#fff' }}
+                        />
+                        <span>{item.name}</span>
+                    </span>
+                    <span className="chart-tooltip-value">{formatTooltipValue(item)}</span>
+                </div>
             ))}
         </div>
     );
@@ -197,28 +275,53 @@ function compactSchemeLabel(value) {
     return text.length > 32 ? `${text.slice(0, 29).trim()}...` : text;
 }
 
-function UploadControl({ loading, onUpload }) {
+function isXlsxFile(file) {
+    return Boolean(file?.name?.toLowerCase().endsWith(XLSX_EXTENSION));
+}
+
+function UploadControl({ loading, onUpload, onInvalidFile }) {
     const inputRef = useRef(null);
     const [fileName, setFileName] = useState('');
 
     async function submitUpload() {
         const file = inputRef.current?.files?.[0];
         if (!file) return;
+        if (!isXlsxFile(file)) {
+            if (inputRef.current) inputRef.current.value = '';
+            setFileName('');
+            onInvalidFile?.('Please upload a .xlsx workbook.');
+            return;
+        }
         await onUpload(file);
         if (inputRef.current) inputRef.current.value = '';
         setFileName('');
+    }
+
+    function handleFileChange(event) {
+        const file = event.target.files?.[0];
+        if (!file) {
+            setFileName('');
+            return;
+        }
+        if (!isXlsxFile(file)) {
+            event.target.value = '';
+            setFileName('');
+            onInvalidFile?.('Please upload a .xlsx workbook.');
+            return;
+        }
+        setFileName(file.name);
     }
 
     return (
         <div className="upload-row compact-upload">
             <label className="file-input">
                 <FileUp size={18} />
-                <span>{fileName || 'Select weekly AMFI workbook'}</span>
+                <span>{fileName || 'Select weekly AMFI .xlsx workbook'}</span>
                 <input
                     ref={inputRef}
                     type="file"
-                    accept=".xlsx,.xls"
-                    onChange={event => setFileName(event.target.files?.[0]?.name || '')}
+                    accept=".xlsx"
+                    onChange={handleFileChange}
                 />
             </label>
             <button className="btn-primary" onClick={submitUpload} disabled={loading || !fileName}>
@@ -248,23 +351,29 @@ function DownloadActions({ selectedFY, selectedPeriodKey, selectedPeriodShort })
 
 function PeriodSelector({ periods, selectedPeriodKey, onChange }) {
     if (!periods?.length) return null;
+    const options = periods.map(period => ({
+        value: period.period_key,
+        label: period.period_label,
+    }));
+    const value = selectedPeriodKey || periods[periods.length - 1]?.period_key || '';
     return (
-        <label className="period-selector">
+        <div className="period-selector">
             <span>Viewing month</span>
-            <select value={selectedPeriodKey || periods[periods.length - 1]?.period_key || ''} onChange={event => onChange(event.target.value)}>
-                {periods.map(period => (
-                    <option key={period.period_key} value={period.period_key}>
-                        {period.period_label}
-                    </option>
-                ))}
-            </select>
-        </label>
+            <GlassSelect
+                value={value}
+                options={options}
+                onChange={onChange}
+                ariaLabel="Viewing month"
+                className="period-glass-select"
+            />
+        </div>
     );
 }
 
 function DashboardControls({
     loading,
     onUpload,
+    onInvalidFile,
     onRefresh,
     archives,
     selectedFY,
@@ -284,23 +393,22 @@ function DashboardControls({
                     {subtitle && <p>{subtitle}</p>}
                 </div>
             )}
-            {showUpload && <UploadControl loading={loading} onUpload={onUpload} />}
+            {showUpload && <UploadControl loading={loading} onUpload={onUpload} onInvalidFile={onInvalidFile} />}
             <div className="download-control-row">
                 {archives.length > 0 && (
-                    <label className="control-field year-field">
+                    <div className="control-field year-field">
                         <span>Financial year</span>
-                        <select
-                            className="fy-select"
+                        <GlassSelect
                             value={selectedFY}
-                            onChange={event => onRefresh(event.target.value, '')}
-                        >
-                            {archives.map(item => (
-                                <option key={item.financial_year} value={item.financial_year}>
-                                    FY {item.financial_year}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
+                            options={archives.map(item => ({
+                                value: item.financial_year,
+                                label: `FY ${item.financial_year}`,
+                            }))}
+                            onChange={financialYear => onRefresh(financialYear, '')}
+                            ariaLabel="Financial year"
+                            className="year-glass-select"
+                        />
+                    </div>
                 )}
                 <PeriodSelector
                     periods={periods}
@@ -322,7 +430,7 @@ function DashboardControls({
     );
 }
 
-function Overview({ data, loading, onUpload, onRefresh, archives, selectedFY, selectedPeriodKey, onPeriodChange }) {
+function Overview({ data, loading, onUpload, onInvalidFile, onRefresh, archives, selectedFY, selectedPeriodKey, onPeriodChange }) {
     const summary = data?.summary || {};
     const series = safeSeries(data, 'timeSeries');
     const selectedIndex = Math.max(0, series.findIndex(row => row.periodKey === selectedPeriodKey));
@@ -337,6 +445,7 @@ function Overview({ data, loading, onUpload, onRefresh, archives, selectedFY, se
             <DashboardControls
                 loading={loading}
                 onUpload={onUpload}
+                onInvalidFile={onInvalidFile}
                 onRefresh={onRefresh}
                 archives={archives}
                 selectedFY={selectedFY}
@@ -456,10 +565,10 @@ function SummaryView({ data }) {
                                 <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
                                 <XAxis dataKey="category" stroke="var(--chart-axis)" interval={0} tickMargin={10} height={70} />
                                 <YAxis stroke="var(--chart-axis)" tickFormatter={value => formatCrore(value)} width={78} />
-                                <Tooltip content={<ChartTooltip />} cursor={tooltipCursor} />
+                                <Tooltip content={<ChartTooltip />} cursor={false} />
                                 <Legend />
-                                <Bar name="Gross Sales" dataKey="grossSales" fill="var(--chart-primary)" activeBar={activeBarStyle} isAnimationActive={false} />
-                                <Bar name="Net Sales" dataKey="netSales" fill="var(--chart-secondary)" activeBar={activeBarStyle} isAnimationActive={false} />
+                                <Bar name="Gross Sales" dataKey="grossSales" fill="var(--chart-primary)" activeBar={renderActiveBar} isAnimationActive={false} />
+                                <Bar name="Net Sales" dataKey="netSales" fill="var(--chart-secondary)" activeBar={renderActiveBar} isAnimationActive={false} />
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
@@ -573,8 +682,8 @@ function SchemesView({ data }) {
                                     tick={{ fontSize: 12 }}
                                     tickLine={false}
                                 />
-                                <Tooltip content={<ChartTooltip />} cursor={tooltipCursor} />
-                                <Bar name="AUM" dataKey="aum" fill="var(--chart-primary)" activeBar={activeBarStyle} isAnimationActive={false} />
+                                <Tooltip content={<ChartTooltip />} cursor={false} />
+                                <Bar name="AUM" dataKey="aum" fill="var(--chart-primary)" activeBar={renderActiveBar} isAnimationActive={false} />
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
@@ -702,6 +811,10 @@ export default function App() {
     }
 
     async function uploadFile(file) {
+        if (!isXlsxFile(file)) {
+            setError('Please upload a .xlsx workbook.');
+            return;
+        }
         setLoading(true);
         setError('');
         const body = new FormData();
@@ -734,6 +847,7 @@ export default function App() {
                     data={data}
                     loading={loading}
                     onUpload={uploadFile}
+                    onInvalidFile={setError}
                     onRefresh={loadData}
                     archives={archives}
                     selectedFY={selectedFY}
