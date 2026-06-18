@@ -1,10 +1,13 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
+    Archive,
     Check,
     ChevronDown,
+    ClipboardList,
     Download,
     FileSpreadsheet,
     FileUp,
+    LayoutDashboard,
     Moon,
     RefreshCw,
     Search,
@@ -34,17 +37,17 @@ const API = import.meta.env.VITE_API_URL ||
 const XLSX_EXTENSION = '.xlsx';
 
 const tabs = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'summary', label: 'Summary' },
-    { id: 'schemes', label: 'Scheme Wise' },
-    { id: 'archives', label: 'Archives' },
+    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+    { id: 'summary', label: 'Summary', icon: ClipboardList },
+    { id: 'schemes', label: 'Scheme Wise', icon: FileSpreadsheet },
+    { id: 'archives', label: 'Archives', icon: Archive },
 ];
 
 const tooltipCursor = { fill: 'var(--chart-cursor)' };
 const locale = 'en-IN';
 
 function renderActiveBar(props) {
-    return <Rectangle {...props} stroke="#fff" strokeWidth={2} strokeOpacity={0.85} />;
+    return <Rectangle {...props} stroke="var(--chart-active-stroke)" strokeWidth={2} strokeOpacity={0.85} />;
 }
 
 function formatNumber(value, digits = 2) {
@@ -281,50 +284,51 @@ function isXlsxFile(file) {
 
 function UploadControl({ loading, onUpload, onInvalidFile }) {
     const inputRef = useRef(null);
-    const [fileName, setFileName] = useState('');
+    const [file, setFile] = useState(null);
+    const [dragging, setDragging] = useState(false);
 
-    async function submitUpload() {
-        const file = inputRef.current?.files?.[0];
-        if (!file) return;
-        if (!isXlsxFile(file)) {
+    function accept(files) {
+        const selected = files?.[0];
+        if (!selected) return;
+        if (!isXlsxFile(selected)) {
             if (inputRef.current) inputRef.current.value = '';
-            setFileName('');
+            setFile(null);
             onInvalidFile?.('Please upload a .xlsx workbook.');
             return;
         }
-        await onUpload(file);
-        if (inputRef.current) inputRef.current.value = '';
-        setFileName('');
+        setFile(selected);
     }
 
-    function handleFileChange(event) {
-        const file = event.target.files?.[0];
-        if (!file) {
-            setFileName('');
-            return;
-        }
-        if (!isXlsxFile(file)) {
-            event.target.value = '';
-            setFileName('');
-            onInvalidFile?.('Please upload a .xlsx workbook.');
-            return;
-        }
-        setFileName(file.name);
+    async function submitUpload() {
+        if (!file) return;
+        await onUpload(file);
+        if (inputRef.current) inputRef.current.value = '';
+        setFile(null);
     }
 
     return (
         <div className="upload-row compact-upload">
-            <label className="file-input">
-                <FileUp size={18} />
-                <span>{fileName || 'Select weekly AMFI .xlsx workbook'}</span>
+            <div
+                className={`drop-zone ${dragging ? 'dragging' : ''}`}
+                onDragOver={event => { event.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={event => { event.preventDefault(); setDragging(false); accept(event.dataTransfer.files); }}
+            >
+                <FileUp size={20} />
+                <div>
+                    <strong>{file?.name || 'Drop the weekly AMFI .xlsx workbook here'}</strong>
+                    <span>.xlsx workbook · or click Browse</span>
+                </div>
+                <button type="button" className="btn-secondary" onClick={() => inputRef.current?.click()}>Browse</button>
                 <input
                     ref={inputRef}
                     type="file"
                     accept=".xlsx"
-                    onChange={handleFileChange}
+                    onChange={event => accept(event.target.files)}
+                    hidden
                 />
-            </label>
-            <button className="btn-primary" onClick={submitUpload} disabled={loading || !fileName}>
+            </div>
+            <button className="btn-primary" onClick={submitUpload} disabled={loading || !file}>
                 {loading ? <span className="spinner" /> : <FileUp size={18} />}
                 Upload
             </button>
@@ -772,6 +776,12 @@ export default function App() {
     const [error, setError] = useState('');
     const [isDarkMode, setIsDarkMode] = useState(true);
 
+    useEffect(() => {
+        const theme = isDarkMode ? 'dark' : 'light';
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+    }, [isDarkMode]);
+
     async function loadData(fy, periodKey = selectedPeriodKey) {
         setLoading(true);
         setError('');
@@ -884,7 +894,7 @@ export default function App() {
                         className={`sidebar-item ${activeTab === tab.id ? 'active' : ''}`}
                         onClick={() => setActiveTab(tab.id)}
                     >
-                        {tab.label}
+                        <tab.icon size={17} /><span>{tab.label}</span>
                     </button>
                 ))}
             </nav>
